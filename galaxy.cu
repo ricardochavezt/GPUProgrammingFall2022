@@ -21,23 +21,54 @@ int    NoofSim;
 unsigned int *histogramDR, *histogramDD, *histogramRR;
 unsigned int *d_histogram;
 
+__host__ __device__ float calculateAngle(float asc1, float decl1, float asc2, float decl2) {
+  float asc1_rad, decl1_rad, asc2_rad, decl2_rad;
+  float cosine;
+  float angle_rad;
+
+  asc1_rad = asc1 / 60 * M_PI / 180;
+  asc2_rad = asc2 / 60 * M_PI / 180;
+  decl1_rad = decl1 / 60 * M_PI / 180;
+  decl2_rad = decl2 / 60 * M_PI / 180;
+
+  cosine = sinf(decl1_rad)*sinf(decl2_rad) + cosf(decl1_rad)*cosf(decl2_rad)*cosf(asc1_rad-asc2_rad);
+  if (cosine > 1.0) {
+    cosine = 1.0;
+  } else if (cosine < -1.0) {
+    cosine = -1.0;
+  }
+
+  angle_rad = acosf(cosine);
+  return angle_rad * 180 / M_PI; // angle in degrees
+}
+
+__global__ void CalculateHistogram(float* ra_1, float* decl_1, float* ra_2, float* decl_2, unsigned int* histogram, int N) {
+  int i = blockDim.x * blockIdx.x + threadIdx.x;
+  if (i >= N) return;
+
+  float angle;
+  int angleIndex;
+  for (int j = i; j < N; j++) {
+    angle = calculateAngle(ra_1[i], decl_1[i], ra_2[j], decl_2[j]);
+    angleIndex = (int)(angle / 0.25);
+    atomicAdd(&histogram[angleIndex], 1);
+  }
+}
+
 int main(int argc, char *argv[])
 {
   //int    i;
   int    noofblocks;
   int    readdata(char *argv1, char *argv2);
   int    getDevice(int deviceno);
-  float  calculateAngle(float asc1, float decl1, float asc2, float decl2);
   long int histogramDRsum, histogramDDsum, histogramRRsum;
   double w;
   double start, end, kerneltime;
   struct timeval _ttime;
   struct timezone _tzone;
-  cudaError_t myError;
+  /* cudaError_t myError; */
 
   FILE *outfil;
-
-  float testAngle;
 
   if ( argc != 4 ) {printf("Usage: a.out real_data random_data output_data\n");return(-1);}
 
@@ -45,81 +76,88 @@ int main(int argc, char *argv[])
 
   if ( readdata(argv[1], argv[2]) != 0 ) return(-1);
 
-  // allocate memory on the GPU
-
-  // copy data to the GPU
-
-  // run the kernels on the GPU
-
-  // copy the results back to the CPU
-
-  // calculate omega values on the CPU
-
   kerneltime = 0.0;
   gettimeofday(&_ttime, &_tzone);
   start = (double)_ttime.tv_sec + (double)_ttime.tv_usec/1000000.;
-
-  /*
-  testAngle = calculateAngle(ra_real[0], decl_real[0], ra_real[1], decl_real[1]);
-  printf("testing angle calculation 1: %f\n", testAngle);
-
-  testAngle = calculateAngle(ra_real[1], decl_real[1], ra_real[0], decl_real[0]);
-  printf("testing angle calculation 2: %f\n", testAngle);
-  */
 
   histogramDD = (unsigned int *)calloc(totaldegrees*binsperdegree, sizeof(unsigned int));
   histogramRR = (unsigned int *)calloc(totaldegrees*binsperdegree, sizeof(unsigned int));
   histogramDR = (unsigned int *)calloc(totaldegrees*binsperdegree, sizeof(unsigned int));
 
-  float angle;
-  int angleIndex;
-  for (int i = 0; i < 10000; i++) {
-    for (int j = i; j < 10000; j++) {
-      angle = calculateAngle(ra_real[i], decl_real[i], ra_real[j], decl_real[j]);
-      angleIndex = (int)(angle / 0.25);
-      histogramDD[angleIndex] += 1;
-    }
-  }
+  // allocate memory on the GPU
+  float *ra_1, *decl_1, *ra_2, *decl_2;
+  // We're assuming NoofReal == NoofSim
+  size_t inputSize = NoofReal*sizeof(float);
+  size_t histogramSize = totaldegrees*binsperdegree*sizeof(unsigned int);
 
-  for (int i = 0; i < 10000; i++) {
-    for (int j = i; j < 10000; j++) {
-      angle = calculateAngle(ra_sim[i], decl_sim[i], ra_sim[j], decl_sim[j]);
-      angleIndex = (int)(angle / 0.25);
-      histogramRR[angleIndex] += 1;
-    }
-  }
+  cudaMalloc(&ra_1, inputSize);
+  cudaMalloc(&decl_1, inputSize);
+  cudaMalloc(&ra_2, inputSize);
+  cudaMalloc(&decl_2, inputSize);
+  cudaMalloc(&d_histogram, histogramSize);
 
-  for (int i = 0; i < 10000; i++) {
-    for (int j = i; j < 10000; j++) {
-      angle = calculateAngle(ra_real[i], decl_real[i], ra_sim[j], decl_sim[j]);
-      angleIndex = (int)(angle / 0.25);
-      histogramDR[angleIndex] += 1;
-    }
-  }
+  // copy data to the GPU
+  cudaMemcpy(ra_1, ra_real, inputSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(decl_1, decl_real, inputSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(ra_2, ra_real, inputSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(decl_2, decl_real, inputSize, cudaMemcpyHostToDevice);
+  cudaMemset(d_histogram, 0, histogramSize);
+
+  // run the kernels on the GPU
+  noofblocks = (NoofReal + threadsperblock - 1) / threadsperblock;
+  CalculateHistogram<<<noofblocks, threadsperblock>>>(ra_1, decl_1, ra_2, decl_2, d_histogram, NoofReal);
+
+  // copy the results back to the CPU
+  cudaMemcpy(histogramDD, d_histogram, histogramSize, cudaMemcpyDeviceToHost);
+  // rinse and repeat for RR and DR
+  cudaMemcpy(ra_1, ra_sim, inputSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(decl_1, decl_sim, inputSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(ra_2, ra_sim, inputSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(decl_2, decl_sim, inputSize, cudaMemcpyHostToDevice);
+  cudaMemset(d_histogram, 0, histogramSize);
+  CalculateHistogram<<<noofblocks, threadsperblock>>>(ra_1, decl_1, ra_2, decl_2, d_histogram, NoofReal);
+  cudaMemcpy(histogramRR, d_histogram, histogramSize, cudaMemcpyDeviceToHost);
+
+  cudaMemcpy(ra_1, ra_real, inputSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(decl_1, decl_real, inputSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(ra_2, ra_sim, inputSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(decl_2, decl_sim, inputSize, cudaMemcpyHostToDevice);
+  cudaMemset(d_histogram, 0, histogramSize);
+  CalculateHistogram<<<noofblocks, threadsperblock>>>(ra_1, decl_1, ra_2, decl_2, d_histogram, NoofReal);
+  cudaMemcpy(histogramDR, d_histogram, histogramSize, cudaMemcpyDeviceToHost);
+
+  cudaFree(ra_1);
+  cudaFree(decl_1);
+  cudaFree(ra_2);
+  cudaFree(decl_2);
+  cudaFree(d_histogram);
 
   gettimeofday(&_ttime, &_tzone);
   end = (double)_ttime.tv_sec + (double)_ttime.tv_usec/1000000.;
   kerneltime += end-start;
 
-  printf("time: %f\n", kerneltime);
+  printf("time: %f s\n", kerneltime);
 
+  // calculate omega values on the CPU
   outfil = fopen(argv[3], "w");
-  fprintf(outfil, "bin start\tomega\thist_DD\thist_DR\thist_RR\n");
+  fprintf(outfil, "bin start\tomega\t\thist_DD\thist_DR\thist_RR\n");
   for (int n = 0; n < totaldegrees*binsperdegree; n++) {
     w = (histogramDD[n] - 2*histogramDR[n] + histogramRR[n]) / float(histogramRR[n]);
     fprintf(outfil, "%f\t%f\t%d\t%d\t%d\n", n*0.25, w, histogramDD[n], histogramDR[n], histogramRR[n]);
   }
   fclose(outfil);
+  free(histogramDD);
+  free(histogramRR);
+  free(histogramDR);
 
   return(0);
 }
 
-
 int readdata(char *argv1, char *argv2)
 {
-  int i,linecount;
+  int i, linecount;
   char inbuf[180];
-  double ra, dec, phi, theta, dpi;
+  double ra, dec;
   FILE *infil;
 
   printf("   Assuming input data is given in arc minutes!\n");
@@ -127,7 +165,7 @@ int readdata(char *argv1, char *argv2)
   // phi   = ra/60.0 * dpi/180.0;
   // theta = (90.0-dec/60.0)*dpi/180.0;
 
-  dpi = acos(-1.0);
+  /* dpi = acos(-1.0); */
   infil = fopen(argv1,"r");
   if ( infil == NULL ) {printf("Cannot open input file %s\n",argv1);return(-1);}
 
@@ -262,23 +300,30 @@ int getDevice(int deviceNo)
   return(0);
 }
 
-float calculateAngle(float asc1, float decl1, float asc2, float decl2) {
-  float asc1_rad, decl1_rad, asc2_rad, decl2_rad;
-  float cosine;
-  float angle_rad;
-
-  asc1_rad = asc1 / 60 * M_PI / 180;
-  asc2_rad = asc2 / 60 * M_PI / 180;
-  decl1_rad = decl1 / 60 * M_PI / 180;
-  decl2_rad = decl2 / 60 * M_PI / 180;
-
-  cosine = sinf(decl1_rad)*sinf(decl2_rad) + cosf(decl1_rad)*cosf(decl2_rad)*cosf(asc1_rad-asc2_rad);
-  if (cosine > 1.0) {
-    cosine = 1.0;
-  } else if (cosine < -1.0) {
-    cosine = -1.0;
+void CalculateHistogramCPU() {
+  float angle;
+  int angleIndex;
+  for (int i = 0; i < 10000; i++) {
+    for (int j = i; j < 10000; j++) {
+      angle = calculateAngle(ra_real[i], decl_real[i], ra_real[j], decl_real[j]);
+      angleIndex = (int)(angle / 0.25);
+      histogramDD[angleIndex] += 1;
+    }
   }
 
-  angle_rad = acosf(cosine);
-  return angle_rad * 180 / M_PI; // angle in degrees
+  for (int i = 0; i < 10000; i++) {
+    for (int j = i; j < 10000; j++) {
+      angle = calculateAngle(ra_sim[i], decl_sim[i], ra_sim[j], decl_sim[j]);
+      angleIndex = (int)(angle / 0.25);
+      histogramRR[angleIndex] += 1;
+    }
+  }
+
+  for (int i = 0; i < 10000; i++) {
+    for (int j = i; j < 10000; j++) {
+      angle = calculateAngle(ra_real[i], decl_real[i], ra_sim[j], decl_sim[j]);
+      angleIndex = (int)(angle / 0.25);
+      histogramDR[angleIndex] += 1;
+    }
+  }
 }
