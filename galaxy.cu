@@ -48,7 +48,7 @@ __global__ void CalculateHistogram(float* ra_1, float* decl_1, float* ra_2, floa
 
   float angle;
   int angleIndex;
-  for (int j = i; j < N; j++) {
+  for (int j = 0; j < N; j++) {
     angle = calculateAngle(ra_1[i], decl_1[i], ra_2[j], decl_2[j]);
     angleIndex = (int)(angle / 0.25);
     atomicAdd(&histogram[angleIndex], 1);
@@ -67,7 +67,7 @@ int main(int argc, char *argv[])
   struct timeval _ttime;
   struct timezone _tzone;
   /* cudaError_t myError; */
-
+  void CalculateHistogramCPU();
   FILE *outfil;
 
   if ( argc != 4 ) {printf("Usage: a.out real_data random_data output_data\n");return(-1);}
@@ -132,6 +132,8 @@ int main(int argc, char *argv[])
   cudaFree(decl_2);
   cudaFree(d_histogram);
 
+  /* CalculateHistogramCPU(); */
+
   gettimeofday(&_ttime, &_tzone);
   end = (double)_ttime.tv_sec + (double)_ttime.tv_usec/1000000.;
   kerneltime += end-start;
@@ -139,12 +141,21 @@ int main(int argc, char *argv[])
   printf("time: %f s\n", kerneltime);
 
   // calculate omega values on the CPU
+  histogramDDsum = 0;
+  histogramRRsum = 0;
+  histogramDRsum = 0;
   outfil = fopen(argv[3], "w");
   fprintf(outfil, "bin start\tomega\t\thist_DD\thist_DR\thist_RR\n");
   for (int n = 0; n < totaldegrees*binsperdegree; n++) {
-    w = (histogramDD[n] - 2*histogramDR[n] + histogramRR[n]) / float(histogramRR[n]);
+    if (histogramRR[n] == 0) break;
+    w = int(histogramDD[n] - 2*histogramDR[n] + histogramRR[n]) / float(histogramRR[n]);
+    histogramDDsum += histogramDD[n];
+    histogramDRsum += histogramDR[n];
+    histogramRRsum += histogramRR[n];
     fprintf(outfil, "%f\t%f\t%d\t%d\t%d\n", n*0.25, w, histogramDD[n], histogramDR[n], histogramRR[n]);
   }
+  printf("count sum:\n");
+  printf("histogram DD: %d, histogram DR: %d, histogram RR: %d\n", histogramDDsum, histogramDRsum, histogramRRsum);
   fclose(outfil);
   free(histogramDD);
   free(histogramRR);
