@@ -23,7 +23,7 @@ unsigned int *d_histogram;
 
 int main(int argc, char *argv[])
 {
-  int    i;
+  //int    i;
   int    noofblocks;
   int    readdata(char *argv1, char *argv2);
   int    getDevice(int deviceno);
@@ -45,7 +45,7 @@ int main(int argc, char *argv[])
 
   if ( readdata(argv[1], argv[2]) != 0 ) return(-1);
 
-  // allocate mameory on the GPU
+  // allocate memory on the GPU
 
   // copy data to the GPU
 
@@ -59,12 +59,57 @@ int main(int argc, char *argv[])
   gettimeofday(&_ttime, &_tzone);
   start = (double)_ttime.tv_sec + (double)_ttime.tv_usec/1000000.;
 
+  /*
   testAngle = calculateAngle(ra_real[0], decl_real[0], ra_real[1], decl_real[1]);
-  printf("testing angle calculation: %f\n", testAngle);
+  printf("testing angle calculation 1: %f\n", testAngle);
+
+  testAngle = calculateAngle(ra_real[1], decl_real[1], ra_real[0], decl_real[0]);
+  printf("testing angle calculation 2: %f\n", testAngle);
+  */
+
+  histogramDD = (unsigned int *)calloc(totaldegrees*binsperdegree, sizeof(unsigned int));
+  histogramRR = (unsigned int *)calloc(totaldegrees*binsperdegree, sizeof(unsigned int));
+  histogramDR = (unsigned int *)calloc(totaldegrees*binsperdegree, sizeof(unsigned int));
+
+  float angle;
+  int angleIndex;
+  for (int i = 0; i < 10000; i++) {
+    for (int j = i; j < 10000; j++) {
+      angle = calculateAngle(ra_real[i], decl_real[i], ra_real[j], decl_real[j]);
+      angleIndex = (int)(angle / 0.25);
+      histogramDD[angleIndex] += 1;
+    }
+  }
+
+  for (int i = 0; i < 10000; i++) {
+    for (int j = i; j < 10000; j++) {
+      angle = calculateAngle(ra_sim[i], decl_sim[i], ra_sim[j], decl_sim[j]);
+      angleIndex = (int)(angle / 0.25);
+      histogramRR[angleIndex] += 1;
+    }
+  }
+
+  for (int i = 0; i < 10000; i++) {
+    for (int j = i; j < 10000; j++) {
+      angle = calculateAngle(ra_real[i], decl_real[i], ra_sim[j], decl_sim[j]);
+      angleIndex = (int)(angle / 0.25);
+      histogramDR[angleIndex] += 1;
+    }
+  }
 
   gettimeofday(&_ttime, &_tzone);
   end = (double)_ttime.tv_sec + (double)_ttime.tv_usec/1000000.;
   kerneltime += end-start;
+
+  printf("time: %f\n", kerneltime);
+
+  outfil = fopen(argv[3], "w");
+  fprintf(outfil, "bin start\tomega\thist_DD\thist_DR\thist_RR\n");
+  for (int n = 0; n < totaldegrees*binsperdegree; n++) {
+    w = (histogramDD[n] - 2*histogramDR[n] + histogramRR[n]) / float(histogramRR[n]);
+    fprintf(outfil, "%f\t%f\t%d\t%d\t%d\n", n*0.25, w, histogramDD[n], histogramDR[n], histogramRR[n]);
+  }
+  fclose(outfil);
 
   return(0);
 }
@@ -220,6 +265,7 @@ int getDevice(int deviceNo)
 float calculateAngle(float asc1, float decl1, float asc2, float decl2) {
   float asc1_rad, decl1_rad, asc2_rad, decl2_rad;
   float cosine;
+  float angle_rad;
 
   asc1_rad = asc1 / 60 * M_PI / 180;
   asc2_rad = asc2 / 60 * M_PI / 180;
@@ -233,5 +279,6 @@ float calculateAngle(float asc1, float decl1, float asc2, float decl2) {
     cosine = -1.0;
   }
 
-  return acosf(cosine);
+  angle_rad = acosf(cosine);
+  return angle_rad * 180 / M_PI; // angle in degrees
 }
