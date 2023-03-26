@@ -43,16 +43,17 @@ __host__ __device__ float calculateAngle(float asc1, float decl1, float asc2, fl
 }
 
 __global__ void CalculateHistogram(float* ra_1, float* decl_1, float* ra_2, float* decl_2, unsigned int* histogram, int N) {
-  int i = blockDim.x * blockIdx.x + threadIdx.x;
+  int threadId = blockDim.x * blockIdx.x + threadIdx.x;
+  int i = threadId / N;
+  int j = threadId % N;
   if (i >= N) return;
 
-  float angle;
-  int angleIndex;
-  for (int j = 0; j < N; j++) {
-    angle = calculateAngle(ra_1[i], decl_1[i], ra_2[j], decl_2[j]);
-    angleIndex = (int)(angle / 0.25);
-    atomicAdd(&histogram[angleIndex], 1);
+  float angle = calculateAngle(ra_1[i], decl_1[i], ra_2[j], decl_2[j]);
+  if (i == 0 && j == 114) {
+    printf("%d,%d: (%f, %f) (%f, %f) angle %f\n", i, j, ra_1[i], decl_1[i], ra_2[j], decl_2[j], angle);
   }
+  int angleIndex = (int)(angle / 0.25);
+  atomicAdd(&histogram[angleIndex], 1);
 }
 
 int main(int argc, char *argv[])
@@ -104,7 +105,7 @@ int main(int argc, char *argv[])
   cudaMemset(d_histogram, 0, histogramSize);
 
   // run the kernels on the GPU
-  noofblocks = (NoofReal + threadsperblock - 1) / threadsperblock;
+  noofblocks = (NoofReal*NoofReal + threadsperblock - 1) / threadsperblock;
   CalculateHistogram<<<noofblocks, threadsperblock>>>(ra_1, decl_1, ra_2, decl_2, d_histogram, NoofReal);
 
   // copy the results back to the CPU
