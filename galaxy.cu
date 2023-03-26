@@ -21,7 +21,7 @@ int    NoofSim;
 unsigned int *histogramDR, *histogramDD, *histogramRR;
 unsigned int *d_histogram;
 
-__host__ __device__ float calculateAngle(float asc1, float decl1, float asc2, float decl2) {
+__device__ float calculateAngle(float asc1, float decl1, float asc2, float decl2) {
   float asc1_rad, decl1_rad, asc2_rad, decl2_rad;
   float cosine;
   float angle_rad;
@@ -55,7 +55,6 @@ __global__ void CalculateHistogram(float* ra_1, float* decl_1, float* ra_2, floa
 
 int main(int argc, char *argv[])
 {
-  //int    i;
   int    noofblocks;
   int    readdata(char *argv1, char *argv2);
   int    getDevice(int deviceno);
@@ -65,7 +64,6 @@ int main(int argc, char *argv[])
   struct timeval _ttime;
   struct timezone _tzone;
   /* cudaError_t myError; */
-  void CalculateHistogramCPU();
   FILE *outfil;
 
   if ( argc != 4 ) {printf("Usage: a.out real_data random_data output_data\n");return(-1);}
@@ -130,8 +128,6 @@ int main(int argc, char *argv[])
   cudaFree(ra_2);
   cudaFree(decl_2);
   cudaFree(d_histogram);
-
-  /* CalculateHistogramCPU(); */
 
   gettimeofday(&_ttime, &_tzone);
   end = (double)_ttime.tv_sec + (double)_ttime.tv_usec/1000000.;
@@ -308,32 +304,4 @@ int getDevice(int deviceNo)
   else printf("   Using CUDA device %d\n\n", device);
 
   return(0);
-}
-
-void CalculateHistogramCPU() {
-  float angle;
-  int angleIndex;
-  for (int i = 0; i < 10000; i++) {
-    for (int j = i; j < 10000; j++) {
-      angle = calculateAngle(ra_real[i], decl_real[i], ra_real[j], decl_real[j]);
-      angleIndex = (int)(angle / 0.25);
-      histogramDD[angleIndex] += 1;
-    }
-  }
-
-  for (int i = 0; i < 10000; i++) {
-    for (int j = i; j < 10000; j++) {
-      angle = calculateAngle(ra_sim[i], decl_sim[i], ra_sim[j], decl_sim[j]);
-      angleIndex = (int)(angle / 0.25);
-      histogramRR[angleIndex] += 1;
-    }
-  }
-
-  for (int i = 0; i < 10000; i++) {
-    for (int j = i; j < 10000; j++) {
-      angle = calculateAngle(ra_real[i], decl_real[i], ra_sim[j], decl_sim[j]);
-      angleIndex = (int)(angle / 0.25);
-      histogramDR[angleIndex] += 1;
-    }
-  }
 }
