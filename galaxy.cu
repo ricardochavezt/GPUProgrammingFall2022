@@ -6,7 +6,7 @@
 
 #define totaldegrees 180
 #define binsperdegree 4
-#define threadsperblock 512
+#define threadsperblock 1024
 
 // data for the real galaxies will be read into these arrays
 float *ra_real, *decl_real;
@@ -43,15 +43,12 @@ __host__ __device__ float calculateAngle(float asc1, float decl1, float asc2, fl
 }
 
 __global__ void CalculateHistogram(float* ra_1, float* decl_1, float* ra_2, float* decl_2, unsigned int* histogram, int N) {
-  int threadId = blockDim.x * blockIdx.x + threadIdx.x;
+  long int threadId = (long int)blockDim.x * blockIdx.x + threadIdx.x;
+  if (threadId >= (long int)N*N) return;
   int i = threadId / N;
   int j = threadId % N;
-  if (i >= N) return;
 
   float angle = calculateAngle(ra_1[i], decl_1[i], ra_2[j], decl_2[j]);
-  if (i == 0 && j == 114) {
-    printf("%d,%d: (%f, %f) (%f, %f) angle %f\n", i, j, ra_1[i], decl_1[i], ra_2[j], decl_2[j], angle);
-  }
   int angleIndex = (int)(angle / 0.25);
   atomicAdd(&histogram[angleIndex], 1);
 }
@@ -105,11 +102,12 @@ int main(int argc, char *argv[])
   cudaMemset(d_histogram, 0, histogramSize);
 
   // run the kernels on the GPU
-  noofblocks = (NoofReal*NoofReal + threadsperblock - 1) / threadsperblock;
+  noofblocks = ((long int)NoofReal*NoofReal + threadsperblock - 1) / threadsperblock;
   CalculateHistogram<<<noofblocks, threadsperblock>>>(ra_1, decl_1, ra_2, decl_2, d_histogram, NoofReal);
 
   // copy the results back to the CPU
   cudaMemcpy(histogramDD, d_histogram, histogramSize, cudaMemcpyDeviceToHost);
+
   // rinse and repeat for RR and DR
   cudaMemcpy(ra_1, ra_sim, inputSize, cudaMemcpyHostToDevice);
   cudaMemcpy(decl_1, decl_sim, inputSize, cudaMemcpyHostToDevice);
