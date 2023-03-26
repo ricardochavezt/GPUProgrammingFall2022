@@ -156,7 +156,7 @@ int main(int argc, char *argv[])
     fprintf(outfil, "%f\t%f\t%d\t%d\t%d\n", n*0.25, w, histogramDD[n], histogramDR[n], histogramRR[n]);
   }
   printf("count sum:\n");
-  printf("histogram DD: %d, histogram DR: %d, histogram RR: %d\n", histogramDDsum, histogramDRsum, histogramRRsum);
+  printf("histogram DD: %ld, histogram DR: %ld, histogram RR: %ld\n", histogramDDsum, histogramDRsum, histogramRRsum);
   fclose(outfil);
   free(histogramDD);
   free(histogramRR);
